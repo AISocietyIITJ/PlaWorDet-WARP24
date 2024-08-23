@@ -13,7 +13,7 @@ split_frac = 0.7
 
 # Load and prepare data
 data = pd.read_csv('./Data/worth_data.csv')
-# data = data.sample(frac=1).reset_index(drop=True)
+data = data.sample(frac=1).reset_index(drop=True)
 
 worth_data = data.drop('index', axis=1)
 worth_data_train = worth_data[:int(split_frac * len(worth_data))].copy()
@@ -113,6 +113,7 @@ with torch.no_grad():
 #save scalers
 joblib.dump(worth_scaler, 'model/worth_scaler.pkl')
 joblib.dump(pos_scaler, 'model/pos_scaler.pkl')
+
 # Create a DataFrame with predictions and actual values for training data
 worth_data_train['Predicted_Worth'] = predicted_worth_train
 worth_data_train['Predicted_Position'] = predicted_positions_train
