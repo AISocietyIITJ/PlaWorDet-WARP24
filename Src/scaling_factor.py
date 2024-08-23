@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 import joblib
+import json
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 split_frac = 0.7
@@ -92,6 +93,7 @@ class PositionPredictor(nn.Module):
         x = self.layer_4(x)
         output = self.logsoftmax(x)
         return output
+    
 
 model_worth = PlayerWorthPredictor().to(device)
 model_pos = PositionPredictor(18, 15).to(device)
@@ -108,7 +110,9 @@ with torch.no_grad():
 model_pos.eval()
 with torch.no_grad():
     predicted_positions_train = model_pos(X_train_pos_tensor).cpu().numpy().argmax(axis=1)
-
+#save scalers
+joblib.dump(worth_scaler, 'model/worth_scaler.pkl')
+joblib.dump(pos_scaler, 'model/pos_scaler.pkl')
 # Create a DataFrame with predictions and actual values for training data
 worth_data_train['Predicted_Worth'] = predicted_worth_train
 worth_data_train['Predicted_Position'] = predicted_positions_train
@@ -154,6 +158,9 @@ for scaling_factor in scaling_factors:
 for position, scaling_factor in best_scaling_factors.items():
     print(f"Position: {position_labels[position]}, Best Scaling Factor: {scaling_factor}")
 
+# Save the best scaling factors to a JSON file
+with open('./model/best_scaling_factors.json', 'w') as file:
+    json.dump(best_scaling_factors, file)
 
 # Predict player worth for the test data
 with torch.no_grad():
@@ -203,3 +210,20 @@ ax.legend()
 
 plt.xticks(np.arange(len(position_labels)), [position_labels[i] for i in range(len(position_labels))])
 plt.show()
+
+class predictor(nn.Module):
+
+    def __init__(self):
+        super(predictor, self).__init__()
+        self.worthpred = PlayerWorthPredictor()
+        self.pospred = PositionPredictor(18, 15)
+
+
+        self.worthpred.load_state_dict(torch.load('./model/worth_model_file.pth'))
+        self.pospred.load_state_dict(torch.load('./model/pos_model_file.pth'))
+
+    def forward(self, x):
+        worth = self.worthpred(x)
+        pos = self.pospred(x)
+        return worth*best_scaling_factors[pos], pos
+    

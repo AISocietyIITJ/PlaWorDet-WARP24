@@ -1,14 +1,13 @@
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import torch
 from sklearn.preprocessing import StandardScaler
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from torch.utils.data import Dataset, DataLoader # type: ignore
+from sklearn.metrics import precision_recall_fscore_support
 import torch.optim.lr_scheduler as lr_scheduler
 import torch
 import torch.nn as nn
@@ -26,24 +25,24 @@ num_epochs = 500
 val_size = 0.2
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-data = pd.read_csv('./Data/CompleteDatasetmayank.csv', encoding='unicode escape', low_memory=False)
+data = pd.read_csv('badadataset.csv', encoding='unicode escape', low_memory=False)
 
 input_features = ['Acceleration', 'Aggression', 'Agility', 'Ball control', 'Curve', 'Dribbling',
-                  'Finishing', 'FK accuracy', 'Heading accuracy', 'Interceptions',
+                  'Finishing', 'FK Accuracy', 'Heading accuracy', 'Interceptions',
                   'Jumping', 'Long shots', 'Penalties', 'Physical / Positioning',
                   'Shot power', 'Strength', 'Vision', 'Volleys',
-                  'Sliding tackle', 'Preferred Positions']
+                  'Sliding tackle', 'Best position']
 data = data[input_features]
 
 l2 = data.columns
 l = []
 lis = []
 for i in range(0, len(data.columns)):
-    if (l2[i] == 'Preferred Positions'): continue
-    for j in range(0, len(data['Preferred Positions'].values)):
+    if (l2[i] == 'Best position'): continue
+    for j in range(0, len(data['Best position'].values)):
         try:
-            int_a = eval(data.iloc[j, i])
-            data.iloc[j, i] = str(int_a)
+            int_a = eval(str(data.iloc[j, i]))
+            data.iloc[j, i] = int_a
         except NameError:
             if (j not in l):
                 l.append(j)
@@ -53,11 +52,11 @@ for i in range(0, len(data.columns)):
 
 data = data.drop(l)
 # pd.to_csv(data, 'CompleteDatasetmayankcorrect.csv')
-
+data.dropna()
 data = data.reset_index()
 
-df = pd.DataFrame(data['Preferred Positions'])
-df['Preferred Positions'] = df['Preferred Positions'].str.split()  # Ensure it is a list of positions
+df = pd.DataFrame(data['Best position'])
+df['Best position'] = df['Best position'].str.split()  # Ensure it is a list of positions
 
 # Define the columns representing each position
 cols = ['ST', 'RW', 'LW', 'CDM', 'CB', 'RM', 'CM', 'LM', 'LB', 'CAM', 'RB', 'CF', 'RWB', 'LWB', 'GK']
@@ -65,16 +64,16 @@ cols = ['ST', 'RW', 'LW', 'CDM', 'CB', 'RM', 'CM', 'LM', 'LB', 'CAM', 'RB', 'CF'
 # Initialize the new dataframe with zeros
 newdf = pd.DataFrame(0, columns=cols, index=range(len(df)))
 
-# Populate the new dataframe based on the preferred positions
-for index, row in df.iterrows():
+# Populate the new dataframe based on the Best position
+for idx, row in df.iterrows():
     for col in cols:
-        if col in row['Preferred Positions']:
-            newdf.loc[index, col] = 1
+        if col in row['Best position']:
+            newdf.at[idx, col] = 1
 
 newdf = newdf.reset_index(drop=True)
 
 input = ['Aggression', 'Agility', 'Ball control', 'Curve', 'Dribbling', 'Finishing'
-    , 'FK accuracy', 'Heading accuracy', 'Interceptions',
+    , 'FK Accuracy', 'Heading accuracy', 'Interceptions',
          'Jumping', 'Long shots', 'Penalties', 'Physical / Positioning',
          'Shot power', 'Strength', 'Vision', 'Volleys',
          'Sliding tackle']
@@ -149,7 +148,7 @@ class Classifier(nn.Module):
 
 
 prediction = Classifier(18, 15).to(device)
-optimizer = torch.optim.AdamW(params=prediction.parameters(), lr=0.001, weight_decay=0.001)
+optimizer = optim.AdamW(params=prediction.parameters(), lr=0.001, weight_decay=0.001)
 loss_function = nn.NLLLoss()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -162,7 +161,7 @@ record = {
     "Test Accuracy": []
 }
 
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
+scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
 
 for epoch in tqdm(range(num_epochs), leave=False):
     prediction.train()
@@ -181,7 +180,7 @@ for epoch in tqdm(range(num_epochs), leave=False):
         train_correct += (output.argmax(1) == y_batch.argmax(1)).sum().item()
 
     train_loss /= len(train_loader)
-    train_accuracy = train_correct / len(train_loader.dataset) * 100
+    train_accuracy = train_correct / len(train_loader.dataset) * 100 # type: ignore
 
     with torch.no_grad():
         prediction.eval()
@@ -196,7 +195,7 @@ for epoch in tqdm(range(num_epochs), leave=False):
             val_correct += (output.argmax(1) == y_batch.argmax(1)).sum().item()
 
         val_loss /= len(val_loader)
-        val_accuracy = val_correct / len(val_loader.dataset) * 100
+        val_accuracy = val_correct / len(val_loader.dataset) * 100 # type: ignore
 
     record["Train Loss"].append(train_loss)
     record["Train Accuracy"].append(train_accuracy)
@@ -205,9 +204,9 @@ for epoch in tqdm(range(num_epochs), leave=False):
 
     scheduler.step(val_loss)  # LR scheduler
 
-    if idx % 1000 == 0:
-        tqdm.set_description(f"Epoch [{epoch}/{num_epochs}]")
-        tqdm.set_postfix(train_loss=train_loss, train_acc=train_accuracy, test_loss=val_loss, test_acc=val_accuracy)
+    if epoch % 1000 == 0:
+        tqdm.set_description(f"Epoch [{epoch}/{num_epochs}]") # type: ignore
+        tqdm.set_postfix(train_loss=train_loss, train_acc=train_accuracy, test_loss=val_loss, test_acc=val_accuracy) # type: ignore
 
 # joblib.dump(prediction, '../model/pospredfin.pkl')
 # joblib.dump(scaler, '../model/poscalerfin.pkl')
