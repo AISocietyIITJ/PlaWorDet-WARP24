@@ -13,7 +13,7 @@ split_frac = 0.7
 
 # Load and prepare data
 data = pd.read_csv('./Data/worth_data.csv')
-data = data.sample(frac=1).reset_index(drop=True)
+# data = data.sample(frac=1).reset_index(drop=True)
 
 worth_data = data.drop('index', axis=1)
 worth_data_train = worth_data[:int(split_frac * len(worth_data))].copy()
@@ -210,20 +210,3 @@ ax.legend()
 
 plt.xticks(np.arange(len(position_labels)), [position_labels[i] for i in range(len(position_labels))])
 plt.show()
-
-class predictor(nn.Module):
-
-    def __init__(self):
-        super(predictor, self).__init__()
-        self.worthpred = PlayerWorthPredictor()
-        self.pospred = PositionPredictor(18, 15)
-
-
-        self.worthpred.load_state_dict(torch.load('./model/worth_model_file.pth'))
-        self.pospred.load_state_dict(torch.load('./model/pos_model_file.pth'))
-
-    def forward(self, x):
-        worth = self.worthpred(x)
-        pos = self.pospred(x)
-        return worth*best_scaling_factors[pos], pos
-    
