@@ -14,18 +14,18 @@ import matplotlib.pyplot as plt
 
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-BATCH_SIZE = 128
+BATCH_SIZE = 256
 NUM_EPOCHS = 50
-LEARNING_RATE = 5e-5
+LEARNING_RATE = 3e-4
 
-data = pd.read_csv('./Data/worth_data.csv')
+data = pd.read_csv('./Data/MergedData.csv')
 data.reset_index(drop=True, inplace=True)
 
-position_input_features = ['Aggression', 'Agility', 'Ball control', 'Curve', 'Dribbling', 'Finishing',
-                  'FK accuracy', 'Heading accuracy', 'Interceptions',
-                  'Jumping', 'Long shots', 'Penalties', 'Physical / Positioning',
-                  'Shot power', 'Strength', 'Vision', 'Volleys',
-                  'Slide Tack']
+position_input_features = ['Aggression', 'Agility', 'BallControl', 'Curve', 'Dribbling', 'Finishing',
+         'FKAccuracy', 'HeadingAccuracy', 'Interceptions',
+         'Jumping', 'LongShots', 'Penalties', 'Positioning',
+         'ShotPower', 'Strength', 'Vision', 'Volleys',
+         'SlidingTackle', 'StandingTackle']
 
 pos_data = data[position_input_features].copy()
 
@@ -34,38 +34,47 @@ pos_data = pos_scaler.fit_transform(pos_data)
 
 pos_data_tensor = torch.tensor(pos_data, dtype=torch.float32).to(DEVICE)
 
-
 class Classifier(nn.Module):
-
     def __init__(self, in_features, out_features):
         super().__init__()
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.3)  # Unified dropout rate
+        self.dropout = nn.Dropout(0.3)
 
-        # Simplified architecture
-        self.layer_1 = nn.Linear(in_features, 128)
-        self.layer_2 = nn.Linear(128, 256)
-        self.layer_3 = nn.Linear(256, 128)
-        self.layer_4 = nn.Linear(128, out_features)
+        self.my_network = nn.Sequential(
+            nn.Linear(in_features, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
 
-        self.batchnorm1 = nn.BatchNorm1d(128)
-        self.batchnorm2 = nn.BatchNorm1d(256)
-        self.batchnorm3 = nn.BatchNorm1d(128)
+            nn.Linear(128, 1024),
+            nn.BatchNorm1d(1024),
+            nn.ReLU(),
+            nn.Dropout1d(0.1),
 
-        self.logsoftmax = nn.LogSoftmax(dim=1)
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout1d(0.1),
+
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+
+            nn.Linear(64, out_features),
+        )
 
     def forward(self, x):
-        x = self.relu(self.batchnorm1(self.layer_1(x)))
-        x = self.dropout(x)
-        x = self.relu(self.batchnorm2(self.layer_2(x)))
-        x = self.dropout(x)
-        x = self.relu(self.batchnorm3(self.layer_3(x)))
-        x = self.dropout(x)
-        x = self.layer_4(x)
-        output = self.logsoftmax(x)
-        return output
+        return self.my_network(x)
 
-pos_classifier = Classifier(18, 15).to(DEVICE)
+
+pos_classifier = Classifier(19, 15).to(DEVICE)
 pos_classifier.load_state_dict(torch.load('./model/pos_model_file.pth'))
 
 with torch.no_grad():
@@ -73,14 +82,14 @@ with torch.no_grad():
     pos_data_tensor = pos_data_tensor.to(DEVICE)
     predicted_positions = pos_classifier(pos_data_tensor).cpu().numpy().argmax(axis=1)
 
-final_input_data = data[['Dribbling', 'Long passing', 'Short passing',
-                         'Overall', 'Special', 'Ball control', 'Shot power', 'Finishing', 'Value']]
+final_input_data = data[['Dribbling', 'LongPassing', 'ShortPassing',
+                         'Overall', 'Special', 'BallControl', 'ShotPower', 'Finishing', 'Value']]
 
 # final_input_data = data[['Sprint speed', 'Dribbling', 'Shot power', 'Reactions',
 #     'Long passing', 'Short passing', 'Physical / Positioning', 'Value']]
 
-final_input_data['Passing'] = (final_input_data['Long passing'] + final_input_data['Short passing']) / 2
-final_input_data = final_input_data.drop(['Long passing', 'Short passing'], axis=1)
+final_input_data['Passing'] = (final_input_data['LongPassing'] + final_input_data['ShortPassing']) / 2
+final_input_data = final_input_data.drop(['LongPassing', 'ShortPassing'], axis=1)
 final_input_data['Position'] = predicted_positions
 
 y_data_tensor = torch.tensor(final_input_data['Value'], dtype=torch.float32).view(-1, 1).to(DEVICE)
@@ -126,7 +135,12 @@ class Model(nn.Module):
         self.out_features = 1
 
         self.my_network = torch.nn.Sequential(
-            nn.Linear(self.in_features, 1024),
+            nn.Linear(self.in_features, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            # nn.Dropout1d(0.1),
+
+            nn.Linear(128, 1024),
             nn.BatchNorm1d(1024),
             nn.ReLU(),
             # nn.Dropout1d(0.1),
@@ -234,10 +248,11 @@ def predict_player_value(index):
     return np.exp(predicted_value[0][0]), y_data_tensor[index]
 
 
-print('Messi -> ', predict_player_value(1))
-print('VVD -> ', predict_player_value(144))
-print('Neuer -> ', predict_player_value(4))
-print('KDB ->', predict_player_value(10293))
+print('C. Ronaldo -> ', predict_player_value(9))
+print('Messi -> ', predict_player_value(57))
+print('VVD -> ', predict_player_value(593))
+print('Neuer -> ', predict_player_value(12158))
+print('KDB ->', predict_player_value(25353))
 # print('', predict_player_value(140))
 
 torch.save(model.state_dict(), './model/app2_f1.pth')
@@ -246,6 +261,6 @@ plt.plot(record["Train Loss"], label="Train")
 plt.plot(record["Val Loss"], label="Val")
 plt.legend()
 
-plt.savefig('plot_2_f1.png', dpi=300, bbox_inches='tight')
+plt.savefig('./plots/plot_2_f1.png', dpi=300, bbox_inches='tight')
 
 plt.show()
