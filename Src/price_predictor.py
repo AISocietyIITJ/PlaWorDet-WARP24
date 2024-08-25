@@ -7,125 +7,147 @@ import json
 import joblib
 
 
-class PlayerWorthPredictor(nn.Module):
+class Model(nn.Module):
     def __init__(self):
-        super(PlayerWorthPredictor, self).__init__()
-        self.fc1 = nn.Linear(37, 64)
-        self.fc2 = nn.Linear(64, 32)
-        self.fc3 = nn.Linear(32, 1)
-        self.relu = nn.ReLU()
+        super().__init__()
+        self.in_features = 8
+        self.out_features = 1
+
+        self.my_network = torch.nn.Sequential(
+            nn.Linear(self.in_features, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            # nn.Dropout1d(0.1),
+
+            nn.Linear(128, 1024),
+            nn.BatchNorm1d(1024),
+            nn.ReLU(),
+            # nn.Dropout1d(0.1),
+
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            # nn.Dropout1d(0.2),
+
+            nn.Linear(512, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            # nn.Dropout1d(0.2),
+
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            # nn.Dropout1d(0.2),
+
+            nn.Linear(64, 1),
+        )
 
     def forward(self, x):
-        x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+        return self.my_network(x)
 
 
 class Classifier(nn.Module):
     def __init__(self, in_features, out_features):
         super().__init__()
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.3)  # Unified dropout rate
+        self.dropout = nn.Dropout(0.3)
 
-        # Simplified architecture
-        self.layer_1 = nn.Linear(in_features, 128)
-        self.layer_2 = nn.Linear(128, 256)
-        self.layer_3 = nn.Linear(256, 128)
-        self.layer_4 = nn.Linear(128, out_features)
+        self.my_network = nn.Sequential(
+            nn.Linear(in_features, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
 
-        self.batchnorm1 = nn.BatchNorm1d(128)
-        self.batchnorm2 = nn.BatchNorm1d(256)
-        self.batchnorm3 = nn.BatchNorm1d(128)
+            nn.Linear(128, 1024),
+            nn.BatchNorm1d(1024),
+            nn.ReLU(),
+            nn.Dropout1d(0.1),
 
-        self.logsoftmax = nn.LogSoftmax(dim=1)
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout1d(0.1),
+
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+
+            nn.Linear(64, out_features),
+        )
 
     def forward(self, x):
-        x = self.relu(self.batchnorm1(self.layer_1(x)))
-        x = self.dropout(x)
-        x = self.relu(self.batchnorm2(self.layer_2(x)))
-        x = self.dropout(x)
-        x = self.relu(self.batchnorm3(self.layer_3(x)))
-        x = self.dropout(x)
-        x = self.layer_4(x)
-        output = self.logsoftmax(x)
-        return output
+        return self.my_network(x)
 
 
 class predictor(nn.Module):
-
     def __init__(self):
         super(predictor, self).__init__()
 
-        device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
+        DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
 
-        self.worthpred = PlayerWorthPredictor()
-        self.pospred = Classifier(18, 15)
+        self.worthpred = Model()
+        self.pospred = Classifier(19, 15)
 
         # Loading only the model weights
-        self.worthpred.load_state_dict(torch.load('./model/worth_model_file.pth', weights_only=True))
+        self.worthpred.load_state_dict(torch.load('./model/app2_f1.pth', weights_only=True))
         self.pospred.load_state_dict(torch.load('./model/pos_model_file.pth', weights_only=True))
 
-        self.name_data = pd.read_csv('./Data/CompleteDatasetmayank.csv', encoding='ISO-8859-1', low_memory=False)
+        data = pd.read_csv('./Data/MergedData.csv')
+        data.reset_index(drop=True, inplace=True)
 
-        data = pd.read_csv('./Data/worth_data.csv')
+        position_input_features = ['Aggression', 'Agility', 'BallControl', 'Curve', 'Dribbling', 'Finishing',
+                                   'FKAccuracy', 'HeadingAccuracy', 'Interceptions',
+                                   'Jumping', 'LongShots', 'Penalties', 'Positioning',
+                                   'ShotPower', 'Strength', 'Vision', 'Volleys',
+                                   'SlidingTackle', 'StandingTackle']
 
-        worth_data = data.drop('index', axis=1)
+        pos_data = data[position_input_features].copy()
 
-        X_worth = worth_data.drop('Value', axis=1)
-        y_worth = worth_data['Value']
+        pos_scaler = StandardScaler()
+        pos_data = pos_scaler.fit_transform(pos_data)
 
-        # worth_scaler = StandardScaler()
-        worth_scaler = joblib.load('./model/worth_scaler.pkl')
-        X_worth = worth_scaler.transform(X_worth)
+        pos_data_tensor = torch.tensor(pos_data, dtype=torch.float32).to(DEVICE)
 
-        self.X_worth_tensor = torch.tensor(X_worth, dtype=torch.float32).to(device)
-        self.y_worth_tensor = torch.tensor(y_worth.values, dtype=torch.float32).view(-1, 1).to(device)
+        with torch.no_grad():
+            self.pospred.eval()
+            pos_data_tensor = pos_data_tensor.to(DEVICE)
+            predicted_positions = self.pospred(pos_data_tensor).cpu().numpy().argmax(axis=1)
 
-        # Creating position_data
-        pos_data = data
+        final_input_data = data[['Dribbling', 'LongPassing', 'ShortPassing',
+                                 'Overall', 'Special', 'BallControl', 'ShotPower', 'Finishing', 'Value']]
 
-        input_features = ['Aggression', 'Agility', 'Ball control', 'Curve', 'Dribbling', 'Finishing',
-                          'FK accuracy', 'Heading accuracy', 'Interceptions',
-                          'Jumping', 'Long shots', 'Penalties', 'Physical / Positioning',
-                          'Shot power', 'Strength', 'Vision', 'Volleys',
-                          'Slide Tack']
+        # final_input_data = data[['Sprint speed', 'Dribbling', 'Shot power', 'Reactions',
+        #     'Long passing', 'Short passing', 'Physical / Positioning', 'Value']]
 
-        X_pos = pos_data[input_features]
+        final_input_data['Passing'] = (final_input_data['LongPassing'] + final_input_data['ShortPassing']) / 2
+        final_input_data = final_input_data.drop(['LongPassing', 'ShortPassing'], axis=1)
+        final_input_data['Position'] = predicted_positions
 
-        # pos_scaler = StandardScaler()
-        pos_scaler = joblib.load('./model/pos_scaler.pkl')
+        self.y_data_tensor = torch.tensor(final_input_data['Value'], dtype=torch.float32).view(-1, 1).to(DEVICE)
+        final_input_data = final_input_data.drop(['Value'], axis=1)
 
-        X_pos = pos_scaler.transform(X_pos)
-        self.X_pos_tensor = torch.tensor(X_pos, dtype=torch.float32).to(device)
+        scaler = StandardScaler()
+        X_data_tensor = scaler.fit_transform(final_input_data)
+        self.X_data_tensor = torch.tensor(X_data_tensor, dtype=torch.float32).to(DEVICE)
 
-        # Load JSON data from the file
-        with open('./model/best_scaling_factors.json', 'r') as file:
-            self.scaling_factors = json.load(file)
 
-    def forward(self, name):
+    def forward(self, idx):
 
-        idx = self.find_index(name)
         self.worthpred.eval()
         self.pospred.eval()
-        pos_data = self.X_pos_tensor[idx].unsqueeze(0)
-        worth_data = self.X_worth_tensor[idx].unsqueeze(0)
-
-        pos_probs = self.pospred(pos_data)
-        pos = torch.argmax(pos_probs, dim=1)
+        worth_data = self.X_data_tensor[idx].unsqueeze(0)
         worth = self.worthpred(worth_data)
 
-        return self.y_worth_tensor[idx].item(), (worth * self.scaling_factors[str(pos.item())]).item()
+        return np.exp(worth.item()), self.y_data_tensor[idx].item()
 
-    def find_index(self, name):
-        matching_rows = self.name_data.index[self.name_data['Name'] == name].tolist()
-
-        if not matching_rows:
-            raise ValueError(f"Player '{name}' not found in the dataset.")
-
-        # Return the first matching index (in case there are duplicates)
-        return matching_rows[0]
 
 if __name__ == '__main__':
     pred = predictor()
-    print(pred('Neymar'))
+    print(pred(9))
