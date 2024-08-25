@@ -1,9 +1,8 @@
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 import torch
-from sklearn.preprocessing import StandardScaler
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader # type: ignore
@@ -15,144 +14,119 @@ from tqdm import tqdm
 from torchsummary import summary
 from sympy import false
 from tqdm import tqdm
+from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 import joblib
 
-# hyperparameters
+# Hyperparameters
 learning_rate = 0.0001
 batch_size = 128
-num_epochs = 500
+num_epochs = 100
 val_size = 0.2
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-data = pd.read_csv('badadataset.csv', encoding='unicode escape', low_memory=False)
+# Load dataset
+data = pd.read_csv('./Data/MergedData.csv', encoding='unicode escape', low_memory=False)
 
-input_features = ['Acceleration', 'Aggression', 'Agility', 'Ball control', 'Curve', 'Dribbling',
-                  'Finishing', 'FK Accuracy', 'Heading accuracy', 'Interceptions',
-                  'Jumping', 'Long shots', 'Penalties', 'Physical / Positioning',
-                  'Shot power', 'Strength', 'Vision', 'Volleys',
-                  'Sliding tackle', 'Best position']
+# Select input features and target column
+input_features = ['Acceleration', 'Aggression', 'Agility', 'BallControl', 'Curve', 'Dribbling',
+                  'Finishing', 'FKAccuracy', 'HeadingAccuracy', 'Interceptions',
+                  'Jumping', 'LongShots', 'Penalties', 'Positioning',
+                  'ShotPower', 'Strength', 'Vision', 'Volleys',
+                  'SlidingTackle', 'StandingTackle', 'Best Position']
+
 data = data[input_features]
 
-l2 = data.columns
-l = []
-lis = []
-for i in range(0, len(data.columns)):
-    if (l2[i] == 'Best position'): continue
-    for j in range(0, len(data['Best position'].values)):
-        try:
-            int_a = eval(str(data.iloc[j, i]))
-            data.iloc[j, i] = int_a
-        except NameError:
-            if (j not in l):
-                l.append(j)
-        except TypeError:
-            if (j not in l):
-                l.append(j)
+# Process target column (Best Position)
+df = pd.DataFrame(data['Best Position'])
+df['Best Position'] = df['Best Position'].str.split()
 
-data = data.drop(l)
-# pd.to_csv(data, 'CompleteDatasetmayankcorrect.csv')
-data.dropna()
-data = data.reset_index()
+# Flatten the list of positions into a single column
+y = df['Best Position'].apply(lambda positions: ' '.join(positions))
 
-df = pd.DataFrame(data['Best position'])
-df['Best position'] = df['Best position'].str.split()  # Ensure it is a list of positions
+# Encode labels
+label_encoder = LabelEncoder()
+y_encoded = label_encoder.fit_transform(y)
 
-# Define the columns representing each position
-cols = ['ST', 'RW', 'LW', 'CDM', 'CB', 'RM', 'CM', 'LM', 'LB', 'CAM', 'RB', 'CF', 'RWB', 'LWB', 'GK']
+# Select input features for the model
+input = ['Aggression', 'Agility', 'BallControl', 'Curve', 'Dribbling', 'Finishing',
+         'FKAccuracy', 'HeadingAccuracy', 'Interceptions',
+         'Jumping', 'LongShots', 'Penalties', 'Positioning',
+         'ShotPower', 'Strength', 'Vision', 'Volleys',
+         'SlidingTackle', 'StandingTackle']
 
-# Initialize the new dataframe with zeros
-newdf = pd.DataFrame(0, columns=cols, index=range(len(df)))
-
-# Populate the new dataframe based on the Best position
-for idx, row in df.iterrows():
-    for col in cols:
-        if col in row['Best position']:
-            newdf.at[idx, col] = 1
-
-newdf = newdf.reset_index(drop=True)
-
-input = ['Aggression', 'Agility', 'Ball control', 'Curve', 'Dribbling', 'Finishing'
-    , 'FK Accuracy', 'Heading accuracy', 'Interceptions',
-         'Jumping', 'Long shots', 'Penalties', 'Physical / Positioning',
-         'Shot power', 'Strength', 'Vision', 'Volleys',
-         'Sliding tackle']
-
-X = data[input]  # Include only the columns you want as input features
-y = newdf
+X = data[input]
 
 # Split the data into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.2, random_state=42)
 
+# Standardize the data
 scaler = StandardScaler()
 X_train = scaler.fit_transform(X_train)
 X_test = scaler.transform(X_test)
 
-X_train_tensor = torch.tensor(X_train, dtype=torch.float)
-X_test_tensor = torch.tensor(X_test, dtype=torch.float)
+# Convert data to PyTorch tensors
+X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
+X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
+y_train_tensor = torch.tensor(y_train, dtype=torch.long)
+y_test_tensor = torch.tensor(y_test, dtype=torch.long)
 
-y_train = np.array(y_train)
-y_test = np.array(y_test)
-
-y_train_tensor = torch.LongTensor(y_train)
-y_test_tensor = torch.LongTensor(y_test)
-
-
-class Dataset(Dataset):
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-
-    def __len__(self):
-        return len(self.x)
-
-    def __getitem__(self, idx):
-        return self.x[idx], self.y[idx]
-
-
-train_dataset = Dataset(X_train_tensor, y_train_tensor)
-test_dataset = Dataset(X_test_tensor, y_test_tensor)
+# Create TensorDataset and DataLoader
+train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-
+# Define the neural network model
 class Classifier(nn.Module):
     def __init__(self, in_features, out_features):
         super().__init__()
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.3)  # Unified dropout rate
+        self.dropout = nn.Dropout(0.3)
 
-        # Simplified architecture
-        self.layer_1 = nn.Linear(in_features, 128)
-        self.layer_2 = nn.Linear(128, 256)
-        self.layer_3 = nn.Linear(256, 128)
-        self.layer_4 = nn.Linear(128, out_features)
+        self.my_network = nn.Sequential(
+            nn.Linear(in_features, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
 
-        self.batchnorm1 = nn.BatchNorm1d(128)
-        self.batchnorm2 = nn.BatchNorm1d(256)
-        self.batchnorm3 = nn.BatchNorm1d(128)
+            nn.Linear(128, 1024),
+            nn.BatchNorm1d(1024),
+            nn.ReLU(),
+            nn.Dropout1d(0.1),
 
-        self.logsoftmax = nn.LogSoftmax(dim=1)
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout1d(0.1),
+
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+
+            nn.Linear(64, out_features),
+        )
 
     def forward(self, x):
-        x = self.relu(self.batchnorm1(self.layer_1(x)))
-        x = self.dropout(x)
-        x = self.relu(self.batchnorm2(self.layer_2(x)))
-        x = self.dropout(x)
-        x = self.relu(self.batchnorm3(self.layer_3(x)))
-        x = self.dropout(x)
-        x = self.layer_4(x)
-        output = self.logsoftmax(x)
-        return output
+        return self.my_network(x)
 
+# Initialize model, optimizer, and loss function
+num_classes = len(label_encoder.classes_)
+prediction = Classifier(19, num_classes).to(device)
+optimizer = optim.AdamW(params=prediction.parameters(), lr=learning_rate, weight_decay=0.001)
+loss_function = nn.CrossEntropyLoss()
 
-prediction = Classifier(18, 15).to(device)
-optimizer = optim.AdamW(params=prediction.parameters(), lr=0.001, weight_decay=0.001)
-loss_function = nn.NLLLoss()
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min')
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-prediction = prediction.to(device)
 # Initialize record dictionary to store metrics
 record = {
     "Train Loss": [],
@@ -161,23 +135,26 @@ record = {
     "Test Accuracy": []
 }
 
-scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
-
-for epoch in tqdm(range(num_epochs), leave=False):
+# Training loop
+for epoch in range(num_epochs):
     prediction.train()
     train_loss = 0
     train_correct = 0
+    loop = tqdm(train_loader)
 
-    for idx, (x_batch, y_batch) in enumerate(train_loader):
+    for idx, (x_batch, y_batch) in enumerate(loop):
         x_batch, y_batch = x_batch.to(device), y_batch.to(device)
         optimizer.zero_grad()
         output = prediction(x_batch)
-        loss = loss_function(output, y_batch.argmax(dim=1))
+        loss = loss_function(output, y_batch)
         loss.backward()
         optimizer.step()
 
         train_loss += loss.item()
-        train_correct += (output.argmax(1) == y_batch.argmax(1)).sum().item()
+        train_correct += (output.argmax(1) == y_batch).sum().item()
+
+        if idx % 10 == 0:
+            loop.set_description(f"Epoch: [{epoch + 1}/{num_epochs}]")
 
     train_loss /= len(train_loader)
     train_accuracy = train_correct / len(train_loader.dataset) * 100 # type: ignore
@@ -190,9 +167,9 @@ for epoch in tqdm(range(num_epochs), leave=False):
         for x_batch, y_batch in val_loader:
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)
             output = prediction(x_batch)
-            loss = loss_function(output, y_batch.argmax(dim=1))
+            loss = loss_function(output, y_batch)
             val_loss += loss.item()
-            val_correct += (output.argmax(1) == y_batch.argmax(1)).sum().item()
+            val_correct += (output.argmax(1) == y_batch).sum().item()
 
         val_loss /= len(val_loader)
         val_accuracy = val_correct / len(val_loader.dataset) * 100 # type: ignore
@@ -202,12 +179,38 @@ for epoch in tqdm(range(num_epochs), leave=False):
     record["Test Loss"].append(val_loss)
     record["Test Accuracy"].append(val_accuracy)
 
-    scheduler.step(val_loss)  # LR scheduler
+    scheduler.step(val_loss)
 
-    if epoch % 1000 == 0:
-        tqdm.set_description(f"Epoch [{epoch}/{num_epochs}]") # type: ignore
-        tqdm.set_postfix(train_loss=train_loss, train_acc=train_accuracy, test_loss=val_loss, test_acc=val_accuracy) # type: ignore
+    print(f"Epoch: [{epoch + 1}/{num_epochs}] || train_loss: {train_loss:.4f} || val_loss: {val_loss:.4f}", end="")
+    print(f" || train_acc: {train_accuracy:.2f} || val_acc: {val_accuracy:.2f}")
 
-# joblib.dump(prediction, '../model/pospredfin.pkl')
-# joblib.dump(scaler, '../model/poscalerfin.pkl')
+
+# Plot and save the training and validation loss
+plt.figure(figsize=(10, 5))
+plt.plot(record["Train Loss"], label="Train Loss")
+plt.plot(record["Test Loss"], label="Validation Loss")
+plt.xlabel("Epochs")
+plt.ylabel("Loss")
+plt.title("Training and Validation Loss")
+plt.legend()
+plt.savefig('./plots/loss_plot.png')
+plt.show()
+
+plt.clf()
+
+# Plot and save the training and validation accuracy
+plt.figure(figsize=(10, 5))
+plt.plot(record["Train Accuracy"], label="Train Accuracy")
+plt.plot(record["Test Accuracy"], label="Validation Accuracy")
+plt.xlabel("Epochs")
+plt.ylabel("Accuracy")
+plt.title("Training and Validation Accuracy")
+plt.legend()
+plt.savefig('./plots/accuracy_plot.png')
+plt.show()
+
+
+# Save the model, scaler, and label encoder
 torch.save(prediction.state_dict(), './model/pos_model_file.pth')
+joblib.dump(scaler, './model/poscalerfin.pkl')
+joblib.dump(label_encoder, './model/label_encoder.pkl')
