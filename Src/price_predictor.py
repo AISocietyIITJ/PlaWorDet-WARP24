@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
+from Similarity_Score import sim_func
 import json
 import joblib
 
@@ -123,6 +124,8 @@ class predictor(nn.Module):
         final_input_data = data[['Dribbling', 'LongPassing', 'ShortPassing',
                                  'Overall', 'Special', 'BallControl', 'ShotPower', 'Finishing', 'Value']]
 
+        self.name_data = data[['ID', 'Name']]
+
         # final_input_data = data[['Sprint speed', 'Dribbling', 'Shot power', 'Reactions',
         #     'Long passing', 'Short passing', 'Physical / Positioning', 'Value']]
 
@@ -138,7 +141,16 @@ class predictor(nn.Module):
         self.X_data_tensor = torch.tensor(X_data_tensor, dtype=torch.float32).to(DEVICE)
 
 
-    def forward(self, idx):
+    def find_similarity_score(self, name):
+        id, club = self.find_id_club(name)
+
+        try:
+            similarity_score = sim_func(id, club)
+            return similarity_score
+        except ValueError:
+            print('Data not found')
+
+    def find_base_price(self, idx):
 
         self.worthpred.eval()
         self.pospred.eval()
@@ -146,6 +158,19 @@ class predictor(nn.Module):
         worth = self.worthpred(worth_data)
 
         return np.exp(worth.item()), self.y_data_tensor[idx].item()
+
+    def find_index(self, name):
+        matching_rows = self.name_data.index[self.name_data['Name'] == name].tolist()
+
+        if not matching_rows:
+            raise ValueError(f"Player '{name}' not found in the dataset.")
+
+        # Return the first matching index (in case there are duplicates)
+        return matching_rows[0]
+
+    def find_id_club(self, name):
+        index = self.find_index(name)
+        return self.name_data[index]['ID'], self.name_data[index]['Club']
 
 
 if __name__ == '__main__':

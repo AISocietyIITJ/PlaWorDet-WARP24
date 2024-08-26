@@ -1,56 +1,63 @@
-import numpy as np
 import pandas as pd
-from sklearn.metrics import mean_absolute_error
+import numpy as np
+from scipy.optimize import minimize
 
 
-def adjust_player_price(base_price, similarity_score, alpha):
-    """
-    Adjust the player's base price based on similarity score.
-    """
-    return base_price * (1 + alpha * (similarity_score - 2))
+def mse_loss(params, predicted_price, similarity_score, actual_price):
+    alpha, beta = params
+    predicted_final_price = alpha * predicted_price + beta * similarity_score * predicted_price
+    mse = np.mean((actual_price - predicted_final_price) ** 2)
+    return mse
 
 
-def grid_search_alpha(player_data, alpha_values):
+def find_best_alpha_beta(file_path):
+    # Load the dataset
+    df = pd.read_csv(file_path)
+    df = df.dropna()
+    df.reset_index(drop=True, inplace=True)
 
-    best_alpha = None
-    best_error = float('inf')
+    # Extract necessary columns
+    predicted_price = df['Predicted Price'].values
+    similarity_score = df['Similarity Score'].values
+    actual_price = df['Actual Price'].values
 
-    for alpha in alpha_values:
-        adjusted_prices = []
-        actual_prices = []
+    # Initial guess for alpha and beta
+    initial_guess = [1.0, 1.0]
 
-        for index, row in player_data.iterrows():
-            # Calculate base price and similarity score
-            predicted_base_price, actual_price = row['Predicted Price'], row['Actual Price']
-            similarity_score = row['Similarity Score']
+    # Minimize the MSE loss function
+    result = minimize(
+        mse_loss,
+        initial_guess,
+        args=(predicted_price, similarity_score, actual_price),
+        method='BFGS'
+    )
 
-            # Adjust the price using the current alpha
-            adjusted_price = adjust_player_price(predicted_base_price, similarity_score, alpha)
+    # Extract optimal alpha and beta
+    alpha, beta = result.x
 
-            # Append to lists
-            adjusted_prices.append(adjusted_price)
-            actual_prices.append(actual_price)
-
-        # Calculate error for the current alpha
-        error = mean_absolute_error(actual_prices, adjusted_prices)
-
-        # Update best alpha if this one is better
-        if error < best_error:
-            best_error = error
-            best_alpha = alpha
-
-        print(f'Alpha: {alpha}, MAE: {error}')
-
-    return best_alpha, best_error
+    return alpha, beta
 
 
-# Example usage
-alpha_values = np.linspace(0, 1, 50)  # Grid of 50 alpha values between 0 and 1
-player_data = pd.read_csv('./Data/ProcessedData.csv')
-player_data = player_data.dropna()
-player_data.reset_index(drop=True, inplace=True)
+def calculate_final_loss(file_path, alpha, beta):
+    df = pd.read_csv(file_path)
+    df = df.dropna()
+    df.reset_index(drop=True, inplace=True)
 
-print('intial error - ', mean_absolute_error(player_data['Predicted Price'], player_data['Actual Price']))
+    predicted_price = df['Predicted Price'].values
+    similarity_score = df['Similarity Score'].values
+    actual_price = df['Actual Price'].values
 
-best_alpha, best_error = grid_search_alpha(player_data, alpha_values)
-print(f'Best Alpha: {best_alpha}, Best MAE: {best_error}')
+    # Calculate the predicted final price using the optimal alpha and beta
+    predicted_final_price = alpha * predicted_price + beta * similarity_score * predicted_price
+
+    # Calculate the Mean Squared Error
+    mse = np.mean((actual_price - predicted_final_price) ** 2)
+
+    return mse
+
+
+# Example usage:
+file_path = './Data/ProcessedData.csv'
+alpha, beta = find_best_alpha_beta(file_path)
+print(f"Optimal Alpha: {alpha:.4f}, Optimal Beta: {beta:.4f}")
+print(f"Final Loss: {calculate_final_loss(file_path, alpha, beta):.4f}")
