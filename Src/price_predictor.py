@@ -10,6 +10,7 @@ from sklearn.ensemble import StackingRegressor
 from xgboost import XGBRegressor
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
 import joblib
+import position_tree
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -123,7 +124,7 @@ class predictor(nn.Module):
         final_input_data = data[['Dribbling', 'LongPassing', 'ShortPassing',
                                  'Overall', 'Special', 'BallControl', 'ShotPower', 'Finishing', 'Value']]
 
-        self.name_data = data[['Index', 'ID', 'Name', 'Club']]
+        self.name_data = data[['Index', 'ID', 'Name', 'Club', 'Best Position']]
 
         final_input_data['Passing'] = (final_input_data['LongPassing'] + final_input_data['ShortPassing']) / 2
         final_input_data = final_input_data.drop(['LongPassing', 'ShortPassing'], axis=1)
@@ -171,11 +172,19 @@ class predictor(nn.Module):
 
     def find_base_price(self, idx, position):
         self.worthpred.eval()
+
+        enc = ['ST', 'RW', 'LW', 'CDM', 'CB', 'RM', 'CM', 'LM', 'LB', 'CAM', 'RB', 'CF', 'RWB', 'LWB', 'GK']
+
+        def encode(x):
+            return enc.index(x)
+
+        ind = enc.index(position)
+
         # Select the data for the specific player index
         data = self.total_data.iloc[idx].copy()
         # Encode the position and update the data
-        encoded_position = self.pos_encoder.transform([position])[0]
-        data['Position'] = encoded_position
+        # encoded_position = self.pos_encoder.transform([position])[0]
+        data['Position'] = ind
         # Drop the 'Value' column to get the input features
         X_data = data.drop(['Value'], axis=0)
         # Convert to DataFrame to perform scaling
@@ -190,7 +199,7 @@ class predictor(nn.Module):
 
         # Get the actual value (unscaled)
         actual_price = np.exp(data['Value'])
-        return np.exp(worth), self.y_data_tensor[idx].item()
+        return np.exp(worth) ##, self.y_data_tensor[idx].item()
 
     def find_index(self, name):
         matching_rows = self.name_data.index[self.name_data['Name'] == name].tolist()
@@ -198,7 +207,7 @@ class predictor(nn.Module):
         if not matching_rows:
             raise ValueError(f"Player '{name}' not found in the dataset.")
 
-        print(matching_rows)
+        # print(matching_rows)
         # Return the first matching index (in case there are duplicates)
         return matching_rows[0]
 
@@ -218,14 +227,35 @@ class predictor(nn.Module):
 
         return final_price[0]
 
+    def position_score(self, idx, position):
+        football_tree = position_tree.create_football_position_tree()
+        best_pos = self.name_data.iloc[idx]['Best Position']
+        distance = position_tree.distance_between_positions(football_tree, best_pos, position)
+        return distance
+
     def forward(self, name, club, position):
-        predicted_price, actual_price = self.find_base_price(self.find_index(name), position)
+        predicted_price  = self.find_base_price(self.find_index(name), position)
         similarity_score = self.find_similarity_score(name, club)
         if similarity_score is None:
-            return None, actual_price
+            return None
         final_price = self.calculate_final_price(predicted_price, similarity_score)
-        return final_price, actual_price, self.find_index(name)
+        distance = self.position_score(self.find_index(name), position)
+        alpha = 1
+        beta = 0.75
+        gamma = 0.4
+        final_price -= alpha * pow(distance, beta) * pow(final_price, gamma)
+
+        return final_price
 
 if __name__ == '__main__':
     pred = predictor()
-    print(pred('L. Messi', 'FC Barcelona', 'ST'))
+    players = ['L. Messi', 'V. van Dijk']
+    clubs = ['FC Barcelona', 'Paris Saint-Germain', 'Liverpool', 'Real Madrid']
+    POSs = ['ST', 'RW', 'LW', 'RB', 'LB', 'CB', 'CDM', 'CAM']
+
+    for player in players:
+        for club in clubs:
+            for pos in POSs:
+                val = pred(player, club, pos)
+                print(f"player-{player}, club- {club}, position-{pos} : ", pred(player, club, pos))
+    # print(pred('L. Messi', 'FC Barcelona', 'ST'))

@@ -19,6 +19,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load dataset
 data = pd.read_csv('./Data/MergedData.csv', encoding='unicode escape', low_memory=False)
+data = data.dropna()
+data.reset_index(drop=True, inplace=True)
 
 # Select input features and target column
 input_features = ['Acceleration', 'Aggression', 'Agility', 'BallControl', 'Curve', 'Dribbling',
@@ -31,14 +33,18 @@ data = data[input_features]
 
 # Process target column (Best Position)
 df = pd.DataFrame(data['Best Position'])
-df['Best Position'] = df['Best Position'].str.split()
-
-# Flatten the list of positions into a single column
-y = df['Best Position'].apply(lambda positions: ' '.join(positions))
+# df['Best Position'] = df['Best Position'].str.split()
 
 # Encode labels
-label_encoder = LabelEncoder()
-y_encoded = label_encoder.fit_transform(y)
+
+enc = ['ST', 'RW', 'LW', 'CDM', 'CB', 'RM', 'CM', 'LM', 'LB', 'CAM', 'RB', 'CF', 'RWB', 'LWB', 'GK']
+# label_encoder = LabelEncoder()
+# y_encoded = label_encoder.fit_transform(y)
+
+def encode(x):
+    return enc.index(x)
+
+y_encoded = df['Best Position'].apply(encode)
 
 # Select input features for the model
 input = ['Aggression', 'Agility', 'BallControl', 'Curve', 'Dribbling', 'Finishing',
@@ -60,8 +66,8 @@ X_test = scaler.transform(X_test)
 # Convert data to PyTorch tensors
 X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
 X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-y_train_tensor = torch.tensor(y_train, dtype=torch.long)
-y_test_tensor = torch.tensor(y_test, dtype=torch.long)
+y_train_tensor = torch.tensor(y_train.values, dtype=torch.long)
+y_test_tensor = torch.tensor(y_test.values, dtype=torch.long)
 
 # Create TensorDataset and DataLoader
 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
@@ -111,7 +117,7 @@ class Classifier(nn.Module):
         return self.my_network(x)
 
 # Initialize model, optimizer, and loss function
-num_classes = len(label_encoder.classes_)
+num_classes = len(enc)
 prediction = Classifier(19, num_classes).to(device)
 optimizer = optim.AdamW(params=prediction.parameters(), lr=learning_rate, weight_decay=0.001)
 loss_function = nn.CrossEntropyLoss()
@@ -204,4 +210,4 @@ plt.show()
 # Save the model, scaler, and label encoder
 torch.save(prediction.state_dict(), './model/pos_model_file.pth')
 joblib.dump(scaler, './model/poscalerfin.pkl')
-joblib.dump(label_encoder, './model/label_encoder.pkl')
+# joblib.dump(label_encoder, './model/label_encoder.pkl')

@@ -1,30 +1,21 @@
 import streamlit as st
-import torch
-from price_predictor import predictor  # Update this import based on your actual module name
-from PIL import Image
+from price_predictor import predictor
 
+# Streamlit app
 def main():
-    st.title("Player Auction Price Predictor")
-
-    # Load the predictor model
     pred = predictor()
 
-    # User input for player name
-    player_name = st.text_input("Enter the player's name:")
+    st.title("Player Information Processing")
 
-    if st.button("Predict Price"):
-        if player_name:
-            try:
-                actual_worth, predicted_worth = pred(player_name)
-                st.write(f"Predicted Auction Price for {player_name}: {predicted_worth:.2f}")
-                st.write(f"Actual Auction Price for {player_name}: {actual_worth}")
-            except ValueError as e:
-                st.error(e)
-        else:
-            st.error("Please enter a player's name.")
+    # Input fields
+    player_name = st.text_input("Enter Player Name")
+    club_name = st.text_input("Enter Club Name")
+    player_position = st.text_input("Enter Player Position")
 
-    image = Image.open('./result/result.png')
-    st.image(image)
+    # Button to trigger the function
+    if st.button("Submit"):
+        result = pred(player_name, club_name, player_position)
+        st.write(result)
 
 if __name__ == "__main__":
     main()
