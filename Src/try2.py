@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.metrics import mean_absolute_error
+import json
+
 
 def complex_model(params, df, original_df):
     alpha, beta, gamma, delta, eta, zeta = params
@@ -17,30 +18,31 @@ def complex_model(params, df, original_df):
         df['Final Price'] = (alpha * (df['Predicted Price'] ** gamma) +
                              beta * (df['Similarity Score'] ** delta) *
                              (df['Predicted Price'] ** eta) + zeta)
-
     except Exception as e:
         print(f"Error in final price calculation: {e}")
         raise
-
-    # Debugging information
-    # print(df[['Predicted Price', 'Similarity Score', 'Final Price', 'Actual Price']].describe())
 
     # Check for NaN values
     if df[['Predicted Price', 'Similarity Score', 'Final Price', 'Actual Price']].isnull().any().any():
         raise ValueError("DataFrame contains NaN values after computation.")
 
+    # Ensure the lengths match
+    if len(df) != len(original_df):
+        raise ValueError(f"Length mismatch: df has {len(df)} rows, original_df has {len(original_df)} rows")
+
     # Calculate the mean absolute error between the final price and actual price
     error = mean_absolute_error(original_df['Actual Price'], df['Final Price'])
     return error
 
-def optimize_parameters(df, original_df, scaler):
+
+def optimize_parameters(df, original_df):
     # Initial guess for parameters [alpha, beta, gamma, delta, eta, zeta]
     initial_params = [1, 1, 1, 1, 1, 0]
 
     # Bounds for the parameters
     bounds = [(0, None), (0, None), (0, None), (0, None), (0, None), (None, None)]
 
-    # Minimize the mean squared error to find the best parameters
+    # Minimize the mean absolute error to find the best parameters
     result = minimize(complex_model, initial_params, args=(df, original_df), bounds=bounds, method='L-BFGS-B')
 
     # Extract the optimized parameters and the lowest error
@@ -49,24 +51,36 @@ def optimize_parameters(df, original_df, scaler):
 
     return optimized_params, lowest_error
 
-def save_results(df, filename, scaler, original_df):
-    # Inverse transform the columns
-    df[['Predicted Price', 'Actual Price', 'Final Price']] = scaler.inverse_transform(df[['Predicted Price', 'Actual Price', 'Similarity Score']])
 
-    df.rename(columns={'Actual Price': 'Final Price', 'Final Price': 'Actual Price'}, inplace=True)
+def save_results(df, filename, best_params):
+    # Ensure 'Predicted Price' and 'Similarity Score' are not modified by the scaler
+    df = df.copy()
 
-
-    df['Actual Price'] = scaler.inverse_transform(df['Actual Price'])
-
-    df.rename(columns={'Actual Price': 'Final Price', 'Final Price': 'Actual Price'}, inplace=True)
-
-    # Re-calculate Final Price using the original values
-    df['Final Price'] = (df['Predicted Price'] ** best_params[2] * best_params[0] +
-                         df['Similarity Score'] ** best_params[3] * df['Predicted Price'] ** best_params[4] * best_params[1] +
-                         best_params[5])
+    # Re-calculate Final Price using the best parameters
+    alpha, beta, gamma, delta, eta, zeta = best_params
+    df['Final Price'] = (alpha * (df['Predicted Price'] ** gamma) +
+                         beta * (df['Similarity Score'] ** delta) *
+                         (df['Predicted Price'] ** eta) + zeta)
 
     # Save DataFrame with Predicted Price, Actual Price, and Final Price
     df[['Predicted Price', 'Actual Price', 'Final Price']].to_csv(filename, index=False)
+
+
+def save_parameters_to_json(params, filename):
+    # Convert parameters to a dictionary
+    params_dict = {
+        'alpha': params[0],
+        'beta': params[1],
+        'gamma': params[2],
+        'delta': params[3],
+        'eta': params[4],
+        'zeta': params[5]
+    }
+
+    # Save the dictionary to a JSON file
+    with open(filename, 'w') as json_file:
+        json.dump(params_dict, json_file, indent=4)
+
 
 # Example usage:
 df = pd.read_csv('./Data/ProcessedData.csv')
@@ -74,31 +88,21 @@ original_df = df[['Predicted Price', 'Actual Price', 'Similarity Score']].copy()
 df = df[['Predicted Price', 'Actual Price', 'Similarity Score']]
 df = df.dropna()
 df.reset_index(drop=True, inplace=True)
-print(df.describe())
-print('----------------------------------------------------')
-
-scalar = StandardScaler()
-df_scaled = scalar.fit_transform(df)
-df = pd.DataFrame(df_scaled, columns=['Predicted Price', 'Actual Price', 'Similarity Score'])
-df.reset_index(drop=True, inplace=True)
+original_df = original_df.loc[df.index]  # Align original_df with df
 print(df.describe())
 
 # Find the best parameters
 try:
-    best_params, lowest_error = optimize_parameters(df, original_df, scalar)
+    best_params, lowest_error = optimize_parameters(df, original_df)
     print(f"Best Parameters: {best_params}, Lowest MAE: {lowest_error}")
-
-    # Re-calculate Final Price with the best parameters
-    alpha, beta, gamma, delta, eta, zeta = best_params
-    df['Predicted Price'] = df['Predicted Price'].clip(lower=1e-8)
-    df['Similarity Score'] = df['Similarity Score'].clip(lower=0)
-    df['Final Price'] = (alpha * (df['Predicted Price'] ** gamma) +
-                         beta * (df['Similarity Score'] ** delta) *
-                         (df['Predicted Price'] ** eta) + zeta)
 
     # Save the result
     print('Saving Final Result')
-    save_results(df, './result/Predicted_vs_Actual.csv', scalar, original_df)
+    save_results(df, './result/Predicted_vs_Actual.csv', best_params)
+
+    # Save best parameters to a JSON file
+    print('Saving Best Parameters to JSON')
+    save_parameters_to_json(best_params, './model/best_params.json')
 
 except ValueError as e:
     print(f"Optimization failed: {e}")
