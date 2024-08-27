@@ -3,9 +3,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
+from Similarity_Score import sim_func
+from sklearn.preprocessing import LabelEncoder
 import json
+from sklearn.ensemble import StackingRegressor
+from xgboost import XGBRegressor
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
 import joblib
+import position_tree
 
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class Model(nn.Module):
     def __init__(self):
@@ -17,34 +24,28 @@ class Model(nn.Module):
             nn.Linear(self.in_features, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            # nn.Dropout1d(0.1),
 
             nn.Linear(128, 1024),
             nn.BatchNorm1d(1024),
             nn.ReLU(),
-            # nn.Dropout1d(0.1),
 
             nn.Linear(1024, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(),
-            # nn.Dropout1d(0.2),
 
             nn.Linear(512, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            # nn.Dropout1d(0.2),
 
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            # nn.Dropout1d(0.2),
 
             nn.Linear(64, 1),
         )
 
     def forward(self, x):
         return self.my_network(x)
-
 
 class Classifier(nn.Module):
     def __init__(self, in_features, out_features):
@@ -85,19 +86,18 @@ class Classifier(nn.Module):
     def forward(self, x):
         return self.my_network(x)
 
-
 class predictor(nn.Module):
     def __init__(self):
         super(predictor, self).__init__()
 
         DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
 
-        self.worthpred = Model()
-        self.pospred = Classifier(19, 15)
+        self.worthpred = Model().to(DEVICE)
+        self.pospred = Classifier(19, 15).to(DEVICE)
 
         # Loading only the model weights
-        self.worthpred.load_state_dict(torch.load('./model/app2_f1.pth', weights_only=True))
-        self.pospred.load_state_dict(torch.load('./model/pos_model_file.pth', weights_only=True))
+        self.worthpred.load_state_dict(torch.load('./model/app2_f1.pth', map_location=DEVICE))
+        self.pospred.load_state_dict(torch.load('./model/pos_model_file.pth', map_location=DEVICE))
 
         data = pd.read_csv('./Data/MergedData.csv')
         data.reset_index(drop=True, inplace=True)
@@ -107,6 +107,7 @@ class predictor(nn.Module):
                                    'Jumping', 'LongShots', 'Penalties', 'Positioning',
                                    'ShotPower', 'Strength', 'Vision', 'Volleys',
                                    'SlidingTackle', 'StandingTackle']
+
 
         pos_data = data[position_input_features].copy()
 
@@ -123,31 +124,138 @@ class predictor(nn.Module):
         final_input_data = data[['Dribbling', 'LongPassing', 'ShortPassing',
                                  'Overall', 'Special', 'BallControl', 'ShotPower', 'Finishing', 'Value']]
 
-        # final_input_data = data[['Sprint speed', 'Dribbling', 'Shot power', 'Reactions',
-        #     'Long passing', 'Short passing', 'Physical / Positioning', 'Value']]
+        self.name_data = data[['Index', 'ID', 'Name', 'Club', 'Best Position']]
 
         final_input_data['Passing'] = (final_input_data['LongPassing'] + final_input_data['ShortPassing']) / 2
         final_input_data = final_input_data.drop(['LongPassing', 'ShortPassing'], axis=1)
         final_input_data['Position'] = predicted_positions
 
-        self.y_data_tensor = torch.tensor(final_input_data['Value'], dtype=torch.float32).view(-1, 1).to(DEVICE)
+        self.total_data = final_input_data
+
+        self.y_data_tensor = torch.tensor(final_input_data['Value'].values, dtype=torch.float32).view(-1, 1).to(DEVICE)
         final_input_data = final_input_data.drop(['Value'], axis=1)
 
-        scaler = StandardScaler()
-        X_data_tensor = scaler.fit_transform(final_input_data)
-        self.X_data_tensor = torch.tensor(X_data_tensor, dtype=torch.float32).to(DEVICE)
+        self.pos_encoder = LabelEncoder()
+        self.pos_encoder = joblib.load('./model/label_encoder.pkl')
 
+        player_data = pd.read_csv('./Data/ProcessedData.csv')
+        player_data = player_data.dropna()
+        player_data.reset_index(drop=True, inplace=True)
 
-    def forward(self, idx):
+        # Prepare the features and target variable
+        X = player_data[['Predicted Price', 'Similarity Score']]
+        y = player_data['Actual Price']
 
+        base_learners = [
+            ('linear', LinearRegression()),
+            ('ridge', Ridge()),
+            ('lasso', Lasso(max_iter=10000)),
+            ('xgb', XGBRegressor(objective='reg:squarederror', n_estimators=100))
+        ]
+
+        self.stacking_model = StackingRegressor(estimators=base_learners, final_estimator=LinearRegression())
+        self.stacking_model.fit(X, y)
+
+        self.scaler = StandardScaler()
+        X_data = self.scaler.fit_transform(final_input_data)
+        self.X_data_tensor = torch.tensor(X_data, dtype=torch.float32).to(DEVICE)
+
+    def find_similarity_score(self, name, club):
+        id = self.find_id(name)
+
+        try:
+            similarity_score = sim_func(id, club)
+            return similarity_score
+        except ValueError:
+            print('Data not found')
+            return None
+
+    def find_base_price(self, idx, position):
         self.worthpred.eval()
-        self.pospred.eval()
-        worth_data = self.X_data_tensor[idx].unsqueeze(0)
-        worth = self.worthpred(worth_data)
 
-        return np.exp(worth.item()), self.y_data_tensor[idx].item()
+        enc = ['ST', 'RW', 'LW', 'CDM', 'CB', 'RM', 'CM', 'LM', 'LB', 'CAM', 'RB', 'CF', 'RWB', 'LWB', 'GK']
 
+        def encode(x):
+            return enc.index(x)
+
+        ind = enc.index(position)
+
+        # Select the data for the specific player index
+        data = self.total_data.iloc[idx].copy()
+        # Encode the position and update the data
+        # encoded_position = self.pos_encoder.transform([position])[0]
+        data['Position'] = ind
+        # Drop the 'Value' column to get the input features
+        X_data = data.drop(['Value'], axis=0)
+        # Convert to DataFrame to perform scaling
+        X_data = pd.DataFrame([X_data])
+        # Scale the data
+        X_data_scaled = self.scaler.transform(X_data)
+        # Convert to tensor
+        X_data_tensor = torch.tensor(X_data_scaled, dtype=torch.float32).to(DEVICE)
+        # Predict the worth using the neural network
+        with torch.no_grad():
+            worth = self.worthpred(X_data_tensor).item()
+
+        # Get the actual value (unscaled)
+        actual_price = np.exp(data['Value'])
+        return np.exp(worth) ##, self.y_data_tensor[idx].item()
+
+    def find_index(self, name):
+        matching_rows = self.name_data.index[self.name_data['Name'] == name].tolist()
+
+        if not matching_rows:
+            raise ValueError(f"Player '{name}' not found in the dataset.")
+
+        # print(matching_rows)
+        # Return the first matching index (in case there are duplicates)
+        return matching_rows[0]
+
+    def find_id(self, name):
+        index = self.find_index(name)
+        return self.name_data.iloc[index]['ID']
+
+    def calculate_final_price(self, predicted_price, similarity_score):
+        # Convert the inputs into a DataFrame with the same structure as the training data
+        input_data = pd.DataFrame({
+            'Predicted Price': [predicted_price],
+            'Similarity Score': [similarity_score]
+        })
+
+        # Use the stacking model to predict the final price
+        final_price = self.stacking_model.predict(input_data)
+
+        return final_price[0]
+
+    def position_score(self, idx, position):
+        football_tree = position_tree.create_football_position_tree()
+        best_pos = self.name_data.iloc[idx]['Best Position']
+        distance = position_tree.distance_between_positions(football_tree, best_pos, position)
+        return distance
+
+    def forward(self, name, club, position):
+        predicted_price  = self.find_base_price(self.find_index(name), position)
+        similarity_score = self.find_similarity_score(name, club)
+        if similarity_score is None:
+            return None
+        final_price = self.calculate_final_price(predicted_price, similarity_score)
+        distance = self.position_score(self.find_index(name), position)
+        alpha = 1
+        beta = 0.75
+        gamma = 0.4
+        final_price -= alpha * pow(distance, beta) * pow(final_price, gamma)
+
+        return final_price
 
 if __name__ == '__main__':
     pred = predictor()
-    print(pred(9))
+    players = ['L. Messi', 'V. van Dijk']
+    clubs = ['FC Barcelona', 'Paris Saint-Germain', 'Liverpool', 'Real Madrid']
+    POSs = ['ST', 'RW', 'LW', 'RB', 'LB', 'CB', 'CDM', 'CAM']
+
+    for player in players:
+        for club in clubs:
+            for pos in POSs:
+                val = pred(player, club, pos)
+                print(f"player-{player}, club- {club}, position-{pos} : ", pred(player, club, pos))
+    # print(pred('L. Messi', 'FC Barcelona', 'ST'))

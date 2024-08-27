@@ -8,7 +8,7 @@ def make_data(player_data):
     base_price_predictor = predictor()
 
     # Create an empty DataFrame to store the results
-    results_df = pd.DataFrame(columns=['Name', 'Club', 'Similarity Score', 'Predicted Price', 'Actual Price'])
+    results_df = pd.DataFrame(columns=['ID', 'Name', 'Club', 'Similarity Score', 'Predicted Price', 'Actual Price'])
 
     for index, row in player_data.iterrows():
         # Calculate base price and similarity score
@@ -19,6 +19,7 @@ def make_data(player_data):
 
             # Append the result to the DataFrame
             results_df = results_df._append({
+                'ID': row['ID'],
                 'Name': row['Name'],
                 'Club': row['Club'],
                 'Similarity Score': similarity_score,
