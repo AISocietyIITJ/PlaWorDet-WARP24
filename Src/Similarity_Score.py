@@ -7,6 +7,10 @@ from numpy import inf
 from sklearn.preprocessing import normalize
 import pickle
 import re
+import warnings
+
+
+warnings.filterwarnings('ignore')
 
 df_17 = pd.read_csv('./Data/FIFA17_official_data.csv')
 df_18 = pd.read_csv('./Data/FIFA18_official_data.csv')
