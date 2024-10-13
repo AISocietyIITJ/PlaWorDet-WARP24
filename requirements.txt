@@ -1,6 +1,6 @@
 joblib==1.4.2
 matplotlib==3.8.4
-numpy==2.1.1
+numpy==2.1.2
 pandas==2.2.3
 scikit_learn==1.5.2
 seaborn==0.13.2
